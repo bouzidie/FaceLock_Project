@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="FaceLockCP/FaceLockCP.vcxproj" Id="034dc88c-d3a8-4ae7-a76d-df5ab893ac64" />
+</Solution>

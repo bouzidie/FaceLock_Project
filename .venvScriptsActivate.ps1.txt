@@ -1,0 +1,10 @@
+PowerShell en tant que admin 
+.\venv\Scripts\Activate.ps1
+ python main.py --enrol
+
+(venv) PS C:\Users\DELL\Desktop\FaceLock_Project\service> python 
+
+-----
+vscode en tant que admin 
+(venv) PS C:\Users\DELL\Desktop\FaceLock_Project> python .\main.py
+
