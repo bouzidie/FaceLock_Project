@@ -1,70 +1,83 @@
 """
-FaceLock Named Pipe Server - Logs optimisés (DEBUG pour connexions)
+Serveur Named Pipe - Version Anti-Crash (Réponse garantie)
 """
 import win32pipe
 import win32file
 import pywintypes
-import threading
 import logging
 import time
 
+logger = logging.getLogger(__name__)
+
 class NamedPipeServer:
-    def __init__(self, pipe_name: str, handler_callback, max_instances: int = 1, buffer_size: int = 65536):
-        self.pipe_name = pipe_name
-        self.handler = handler_callback
-        self.max_instances = max_instances
+    def __init__(self, pipe_name: str, handler_callback, buffer_size: int = 4096):
+        self.pipe_name = pipe_name if pipe_name.startswith("\\\\.\\pipe\\") else f"\\\\.\\pipe\\{pipe_name}"
+        self.handler_callback = handler_callback
         self.buffer_size = buffer_size
-        self.is_running = False
-        self.logger = logging.getLogger("PipeServer")
+        self._running = False
 
     def start(self):
-        self.is_running = True
-        self.logger.info(f"👂 Serveur Named Pipe démarré sur {self.pipe_name}")
+        self._running = True
+        logger.info(f"👂 Serveur Named Pipe démarré sur {self.pipe_name}")
         
-        while self.is_running:
+        while self._running:
+            pipe_handle = None
             try:
-                pipe = win32pipe.CreateNamedPipe(
+                # 1. Créer le pipe
+                pipe_handle = win32pipe.CreateNamedPipe(
                     self.pipe_name,
                     win32pipe.PIPE_ACCESS_DUPLEX,
-                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,
-                    self.max_instances,
-                    self.buffer_size, self.buffer_size, 0,
-                    None
+                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,
+                    win32pipe.PIPE_UNLIMITED_INSTANCES,
+                    self.buffer_size,
+                    self.buffer_size,
+                    0, None
                 )
                 
-                self.logger.debug("⏳ En attente de connexion...")
-                win32pipe.ConnectNamedPipe(pipe, None)
-                self.logger.debug("✅ Client connecté.")  # <-- DEBUG pour éviter le spam
+                # 2. Attendre connexion
+                win32pipe.ConnectNamedPipe(pipe_handle, None)
                 
-                client_thread = threading.Thread(target=self._handle_client, args=(pipe,), daemon=True)
-                client_thread.start()
+                # 3. Lire requête
+                result, data = win32file.ReadFile(pipe_handle, self.buffer_size)
+                if not data:
+                    continue
                 
+                # 4. Traiter (TOUT est isolé pour éviter de tuer le pipe)
+                response = None
+                try:
+                    response = self.handler_callback(data)
+                except Exception as e:
+                    logger.error(f"❌ Erreur IA: {e}")
+                    response = b'{"status":"error","reason":"ia_processing_failed"}'
+                
+                # 5. Envoyer réponse (avec protection anti-crash)
+                if response:
+                    try:
+                        win32file.WriteFile(pipe_handle, response)
+                    except pywintypes.error as werr:
+                        # Si le client a déjà fermé, on loggue mais on ne crash pas
+                        if werr.winerror != 109:
+                            logger.error(f"❌ Échec écriture pipe: {werr}")
+                            
             except pywintypes.error as e:
-                code = e.args[0]
-                if code == 231:  # PIPE_BUSY
+                if e.winerror == 109:
+                    logger.debug("🔌 Client déconnecté normalement")
+                elif e.winerror == 231:
                     time.sleep(0.2)
-                    continue
-                elif code == 997:  # IO_PENDING
-                    continue
                 else:
-                    self.logger.error(f"❌ Erreur pipe: {e}")
-                    if not self.is_running: break
+                    logger.error(f"❌ Win32 {e.winerror}: {e}")
             except Exception as e:
-                self.logger.error(f"❌ Erreur boucle: {e}")
-                break
+                logger.error(f"💥 Erreur serveur: {e}")
+            finally:
+                # 6. Nettoyage propre
+                if pipe_handle is not None:
+                    try:
+                        win32pipe.DisconnectNamedPipe(pipe_handle)
+                        win32file.CloseHandle(pipe_handle)
+                    except: pass
+                time.sleep(0.05)
                 
-        self.logger.info("🛑 Serveur arrêté.")
-
-    def _handle_client(self, pipe):
-        try:
-            _, data = win32file.ReadFile(pipe, self.buffer_size)
-            response_bytes = self.handler(data)
-            win32file.WriteFile(pipe, response_bytes)
-        except Exception as e:
-            self.logger.error(f"️ Erreur client: {e}")
-        finally:
-            try: win32file.CloseHandle(pipe)
-            except: pass
+        logger.info("🛑 Serveur arrêté")
 
     def stop(self):
-        self.is_running = False
+        self._running = False
