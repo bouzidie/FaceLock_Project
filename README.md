@@ -118,7 +118,7 @@ La protection des données personnelles constitue un axe important de la concept
 
 ## Architecture 
 <div align="center">
-  <img src="./Facelock.png" alt="Architecture Face Lock" width="100%">
+  <img src="./FaceLock.png" alt="Architecture Face Lock" width="100%">
 </div>
 
 
